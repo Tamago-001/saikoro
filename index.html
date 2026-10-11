@@ -72,7 +72,7 @@
 
     .dice-icon-btn {
       cursor: pointer;
-      font-size: 1.5rem;
+      font-size: 1.6rem;
       transition: transform 0.1s ease;
       display: inline-block;
     }
@@ -85,16 +85,17 @@
       top: 70px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(245, 158, 11, 0.9);
+      background: rgba(245, 158, 11, 0.95);
       color: #1e293b;
       font-weight: bold;
-      font-size: 0.85rem;
-      padding: 6px 16px;
+      font-size: 0.9rem;
+      padding: 6px 18px;
       border-radius: 20px;
       opacity: 0;
-      transition: opacity 0.3s ease;
+      transition: opacity 0.2s ease;
       pointer-events: none;
       z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
     .toast-indicator.show {
       opacity: 1;
@@ -104,29 +105,18 @@
       position: absolute;
       top: 75px;
       right: 16px;
-      width: 240px;
+      width: 200px;
       display: flex;
       flex-direction: column;
       gap: 10px;
     }
 
-    .control-group {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    label {
-      font-size: 0.8rem;
-      color: #94a3b8;
-    }
-
-    select, button {
+    button {
       background: #1e293b;
       color: #f8fafc;
       border: 1px solid rgba(255, 255, 255, 0.15);
-      padding: 10px 14px;
-      border-radius: 10px;
+      padding: 12px 14px;
+      border-radius: 12px;
       font-size: 0.9rem;
       font-weight: 600;
       cursor: pointer;
@@ -137,7 +127,6 @@
       color: #ffffff;
       border: none;
       font-size: 1rem;
-      padding: 12px;
     }
 
     .btn-notify {
@@ -147,29 +136,26 @@
 
     .result-panel {
       position: absolute;
-      bottom: 20px;
+      bottom: 24px;
       left: 50%;
       transform: translateX(-50%);
       text-align: center;
-      min-width: 220px;
+      min-width: 200px;
     }
 
     .result-title {
       font-size: 0.75rem;
       color: #94a3b8;
       text-transform: uppercase;
+      letter-spacing: 1px;
     }
 
     .result-value {
-      font-size: 2.6rem;
+      font-size: 3rem;
       font-weight: 800;
       color: #fbbf24;
-      line-height: 1.1;
-    }
-
-    .result-details {
-      font-size: 0.85rem;
-      color: #cbd5e1;
+      line-height: 1;
+      margin-top: 2px;
     }
   </style>
 
@@ -191,33 +177,25 @@
     </header>
 
     <div class="controls panel interactive">
-      <button id="btn-roll" class="btn-roll">🎲 サイコロを振る</button>
+      <button id="btn-roll" class="btn-roll">🎲 画面で振る</button>
       <button id="btn-notify-trigger" class="btn-notify">🔔 通知を出す</button>
-
-      <div class="control-group">
-        <label>サイコロの個数</label>
-        <select id="select-count">
-          <option value="1">1 個</option>
-          <option value="2" selected>2 個</option>
-        </select>
-      </div>
     </div>
 
     <div class="result-panel panel interactive">
-      <div class="result-title">Total Result</div>
+      <div class="result-title">Result</div>
       <div id="result-value" class="result-value">-</div>
-      <div id="result-details" class="result-details">タップで振る</div>
     </div>
   </div>
 
   <script>
     let scene, camera, renderer, controls;
-    let world, diceBodies = [], diceMeshes = [];
+    let world, diceBody, diceMesh;
     let isRolling = false;
-    let cheatActive = false;
-    let targetFace = 6;
+    let isForcedTarget = false; // 強制補正フラグ
+    let targetFace = 6;         // 確定させる出目 (1〜6)
     let swRegistration = null;
 
+    // 面の向きベクトル定義
     const diceFaceVectors = [
       { face: 1, vec: new THREE.Vector3(0, 0, 1) },
       { face: 2, vec: new THREE.Vector3(0, 0, -1) },
@@ -264,7 +242,7 @@
       scene.background = new THREE.Color(0x0f172a);
 
       camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
-      camera.position.set(0, 12, 14);
+      camera.position.set(0, 10, 12);
 
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -286,8 +264,9 @@
       world.gravity.set(0, -25, 0);
 
       const mat = new CANNON.Material();
-      world.addContactMaterial(new CANNON.ContactMaterial(mat, mat, { friction: 0.3, restitution: 0.5 }));
+      world.addContactMaterial(new CANNON.ContactMaterial(mat, mat, { friction: 0.4, restitution: 0.4 }));
 
+      // 床
       const floorBody = new CANNON.Body({ mass: 0, material: mat });
       floorBody.addShape(new CANNON.Plane());
       floorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
@@ -298,113 +277,106 @@
       floorMesh.receiveShadow = true;
       scene.add(floorMesh);
 
-      updateDiceCount(2);
+      // サイコロ（1個作成）
+      const geo = new THREE.BoxGeometry(2, 2, 2);
+      diceMesh = new THREE.Mesh(geo, createDiceMaterials());
+      diceMesh.castShadow = true;
+      scene.add(diceMesh);
+
+      diceBody = new CANNON.Body({ mass: 2 });
+      diceBody.addShape(new CANNON.Box(new CANNON.Vec3(1, 1, 1)));
+      world.addBody(diceBody);
+
       setupUI();
       setupNotification();
 
       animate();
     }
 
-    function updateDiceCount(count) {
-      diceBodies.forEach(b => world.remove(b));
-      diceMeshes.forEach(m => scene.remove(m));
-      diceBodies = []; diceMeshes = [];
-
-      const mats = createDiceMaterials();
-      const geo = new THREE.BoxGeometry(1.8, 1.8, 1.8);
-
-      for (let i = 0; i < count; i++) {
-        const mesh = new THREE.Mesh(geo, mats);
-        mesh.castShadow = true;
-        scene.add(mesh);
-        diceMeshes.push(mesh);
-
-        const body = new CANNON.Body({ mass: 2 });
-        body.addShape(new CANNON.Box(new CANNON.Vec3(0.9, 0.9, 0.9)));
-        world.addBody(body);
-        diceBodies.push(body);
-      }
-    }
-
+    // サイコロを投げる処理
     function rollDice(enableCheat = false) {
       if (isRolling) return;
       isRolling = true;
-      cheatActive = enableCheat;
+      isForcedTarget = enableCheat;
 
       document.getElementById('result-value').innerText = '...';
-      document.getElementById('result-details').innerText = '回転中...';
 
-      const count = diceBodies.length;
-      diceBodies.forEach((body, i) => {
-        const offsetX = (i - (count - 1) / 2) * 2.5;
-        body.position.set(offsetX, 6 + Math.random() * 2, (Math.random() - 0.5) * 2);
-        body.velocity.set((Math.random() - 0.5) * 8, -5, (Math.random() - 0.5) * 8);
-
-        if (cheatActive) {
-          applyCheatInitialRotation(body, targetFace);
-        } else {
-          body.quaternion.setFromEuler(Math.random() * 6, Math.random() * 6, Math.random() * 6);
-          body.angularVelocity.set((Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25);
-        }
-      });
+      // 初期位置と勢い
+      diceBody.position.set(0, 7, 0);
+      diceBody.velocity.set((Math.random() - 0.5) * 6, -4, (Math.random() - 0.5) * 6);
+      diceBody.angularVelocity.set((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30);
+      diceBody.quaternion.setFromEuler(Math.random() * 6, Math.random() * 6, Math.random() * 6);
 
       checkDiceStopped();
     }
 
-    function applyCheatInitialRotation(body, target) {
+    // 停止判定 & 狙い目へ最終調整
+    function checkDiceStopped() {
+      const timer = setInterval(() => {
+        const speed = diceBody.velocity.length() + diceBody.angularVelocity.length();
+
+        // 勢いが落ちてきたら（停止間近）イカサマの狙い目へ補正
+        if (isForcedTarget && speed < 3.0 && speed > 0.1) {
+          applyTargetQuat(targetFace);
+        }
+
+        if (speed <= 0.05) {
+          clearInterval(timer);
+          isRolling = false;
+          
+          if (isForcedTarget) {
+            applyTargetQuat(targetFace); // 最終確定
+          }
+
+          calculateResults();
+        }
+      }, 100);
+    }
+
+    // 指定した出目を正確に真上に向かせる角度計算＆補正
+    function applyTargetQuat(target) {
       const targetVecInfo = diceFaceVectors.find(v => v.face === target);
       if (!targetVecInfo) return;
 
+      // 指定面が上(0, 1, 0)を向く角度を算出
       const targetQuat = new THREE.Quaternion();
       targetQuat.setFromUnitVectors(targetVecInfo.vec, new THREE.Vector3(0, 1, 0));
 
-      const randomYQuat = new THREE.Quaternion();
-      randomYQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI * (Math.floor(Math.random() * 4) / 2));
-      targetQuat.multiply(randomYQuat);
+      // Y軸（回転の向き）だけはランダムにして自然に見せる
+      const currentEuler = new THREE.Euler().setFromQuaternion(diceMesh.quaternion, 'YXZ');
+      const yRotationQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), currentEuler.y);
+      targetQuat.multiply(yRotationQuat);
 
-      body.quaternion.copy(targetQuat);
-      body.angularVelocity.set(0, (Math.random() - 0.5) * 4, 0);
-    }
-
-    function checkDiceStopped() {
-      const timer = setInterval(() => {
-        let allStopped = true;
-        diceBodies.forEach(body => {
-          if (body.velocity.length() + body.angularVelocity.length() > 0.1) allStopped = false;
-        });
-
-        if (allStopped) {
-          clearInterval(timer);
-          isRolling = false;
-          calculateResults();
-        }
-      }, 200);
+      // スムーズに目標の角度に回転を落とし込む
+      diceMesh.quaternion.slerp(targetQuat, 0.4);
+      diceBody.quaternion.copy(diceMesh.quaternion);
+      
+      // 暴れないように速度を急減速
+      diceBody.angularVelocity.scale(0.3, diceBody.angularVelocity);
     }
 
     function calculateResults() {
-      const results = [];
-      diceMeshes.forEach((mesh) => {
-        let maxDot = -1, topFace = 1;
-        diceFaceVectors.forEach(fv => {
-          const dot = fv.vec.clone().applyQuaternion(mesh.quaternion).dot(new THREE.Vector3(0, 1, 0));
-          if (dot > maxDot) { maxDot = dot; topFace = fv.face; }
-        });
-        results.push(topFace);
+      let maxDot = -1, resultFace = 1;
+
+      diceFaceVectors.forEach(fv => {
+        const dot = fv.vec.clone().applyQuaternion(diceMesh.quaternion).dot(new THREE.Vector3(0, 1, 0));
+        if (dot > maxDot) {
+          maxDot = dot;
+          resultFace = fv.face;
+        }
       });
 
-      const total = results.reduce((a, b) => a + b, 0);
-      document.getElementById('result-value').innerText = total;
-      document.getElementById('result-details').innerText = `出目: [ ${results.join(' , ')} ]`;
+      document.getElementById('result-value').innerText = resultFace;
 
       if (swRegistration && Notification.permission === 'granted') {
         swRegistration.showNotification('🎲 出目結果', {
-          body: `合計: ${total} (出目: ${results.join(', ')})`,
+          body: `出目: 【 ${resultFace} 】`,
           tag: 'dice-result'
         });
       }
     }
 
-    // --- 正しい外部ファイル 'sw.js' を登録 ---
+    // Service Worker連携
     async function setupNotification() {
       if ('serviceWorker' in navigator && 'Notification' in window) {
         try {
@@ -412,14 +384,14 @@
           navigator.serviceWorker.addEventListener('message', (e) => {
             if (e.data) {
               if (e.data.action === 'cheat') {
-                rollDice(true);
+                rollDice(true);  // 機能ON（確定モード）
               } else {
-                rollDice(false);
+                rollDice(false); // 普通に振る
               }
             }
           });
         } catch (err) {
-          console.error('Service Worker Registration Failed:', err);
+          console.error(err);
         }
       }
     }
@@ -433,15 +405,13 @@
       Notification.requestPermission().then((permission) => {
         if (permission === 'granted' && swRegistration) {
           swRegistration.showNotification('3D Dice Roller', {
-            body: '振るモードを選択してください',
+            body: 'どちらで振りますか？',
             actions: [
               { action: 'normal', title: '🎲 普通に振る' },
               { action: 'cheat', title: '⚡ 機能ON' }
             ],
             tag: 'dice-control'
           });
-        } else if (permission === 'denied') {
-          alert('Androidの「設定 ＞ アプリ ＞ Chrome ＞ 通知」が許可されているか確認してください。');
         }
       });
     }
@@ -454,6 +424,7 @@
     }
 
     function setupUI() {
+      // 🎲タップで狙う出目を順繰り切り替え
       document.getElementById('btn-dice-toggle').addEventListener('click', (e) => {
         e.stopPropagation();
         targetFace = (targetFace % 6) + 1;
@@ -462,18 +433,16 @@
 
       document.getElementById('btn-roll').addEventListener('click', () => rollDice(false));
       document.getElementById('btn-notify-trigger').addEventListener('click', sendRollNotification);
-      document.getElementById('select-count').addEventListener('change', (e) => {
-        updateDiceCount(parseInt(e.target.value));
-      });
     }
 
     function animate() {
       requestAnimationFrame(animate);
       world.step(1 / 60);
-      for (let i = 0; i < diceBodies.length; i++) {
-        diceMeshes[i].position.copy(diceBodies[i].position);
-        diceMeshes[i].quaternion.copy(diceBodies[i].quaternion);
-      }
+
+      // 物理計算の位置・角度を同期
+      diceMesh.position.copy(diceBody.position);
+      diceMesh.quaternion.copy(diceBody.quaternion);
+
       controls.update();
       renderer.render(scene, camera);
     }
