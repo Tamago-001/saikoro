@@ -191,11 +191,12 @@
     let scene, camera, renderer, controls;
     let world, diceBody, diceMesh;
     let isRolling = false;
-    let isForcedTarget = false; // 強制補正フラグ
-    let targetFace = 6;         // 確定させる出目 (1〜6)
+
+    // --- 機能ON状態のグローバル状態保持 ---
+    let isCheatEnabled = false; // 通知で「機能ON」にすると true に保持される
+    let targetFace = 6;         // 確定させる狙い出目 (1〜6)
     let swRegistration = null;
 
-    // 面の向きベクトル定義
     const diceFaceVectors = [
       { face: 1, vec: new THREE.Vector3(0, 0, 1) },
       { face: 2, vec: new THREE.Vector3(0, 0, -1) },
@@ -277,7 +278,7 @@
       floorMesh.receiveShadow = true;
       scene.add(floorMesh);
 
-      // サイコロ（1個作成）
+      // サイコロ
       const geo = new THREE.BoxGeometry(2, 2, 2);
       diceMesh = new THREE.Mesh(geo, createDiceMaterials());
       diceMesh.castShadow = true;
@@ -293,11 +294,10 @@
       animate();
     }
 
-    // サイコロを投げる処理
-    function rollDice(enableCheat = false) {
+    // サイコロを振る（画面ボタン / 通知からの両方で呼ばれる）
+    function rollDice() {
       if (isRolling) return;
       isRolling = true;
-      isForcedTarget = enableCheat;
 
       document.getElementById('result-value').innerText = '...';
 
@@ -310,13 +310,12 @@
       checkDiceStopped();
     }
 
-    // 停止判定 & 狙い目へ最終調整
     function checkDiceStopped() {
       const timer = setInterval(() => {
         const speed = diceBody.velocity.length() + diceBody.angularVelocity.length();
 
-        // 勢いが落ちてきたら（停止間近）イカサマの狙い目へ補正
-        if (isForcedTarget && speed < 3.0 && speed > 0.1) {
+        // isCheatEnabled が true の間は常に確定補正を適用
+        if (isCheatEnabled && speed < 3.0 && speed > 0.1) {
           applyTargetQuat(targetFace);
         }
 
@@ -324,8 +323,8 @@
           clearInterval(timer);
           isRolling = false;
           
-          if (isForcedTarget) {
-            applyTargetQuat(targetFace); // 最終確定
+          if (isCheatEnabled) {
+            applyTargetQuat(targetFace); // 最終角度確定
           }
 
           calculateResults();
@@ -333,25 +332,20 @@
       }, 100);
     }
 
-    // 指定した出目を正確に真上に向かせる角度計算＆補正
     function applyTargetQuat(target) {
       const targetVecInfo = diceFaceVectors.find(v => v.face === target);
       if (!targetVecInfo) return;
 
-      // 指定面が上(0, 1, 0)を向く角度を算出
       const targetQuat = new THREE.Quaternion();
       targetQuat.setFromUnitVectors(targetVecInfo.vec, new THREE.Vector3(0, 1, 0));
 
-      // Y軸（回転の向き）だけはランダムにして自然に見せる
       const currentEuler = new THREE.Euler().setFromQuaternion(diceMesh.quaternion, 'YXZ');
       const yRotationQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), currentEuler.y);
       targetQuat.multiply(yRotationQuat);
 
-      // スムーズに目標の角度に回転を落とし込む
       diceMesh.quaternion.slerp(targetQuat, 0.4);
       diceBody.quaternion.copy(diceMesh.quaternion);
       
-      // 暴れないように速度を急減速
       diceBody.angularVelocity.scale(0.3, diceBody.angularVelocity);
     }
 
@@ -376,7 +370,7 @@
       }
     }
 
-    // Service Worker連携
+    // Service Worker からの受信処理
     async function setupNotification() {
       if ('serviceWorker' in navigator && 'Notification' in window) {
         try {
@@ -384,9 +378,11 @@
           navigator.serviceWorker.addEventListener('message', (e) => {
             if (e.data) {
               if (e.data.action === 'cheat') {
-                rollDice(true);  // 機能ON（確定モード）
+                isCheatEnabled = true; // ★機能ONフラグを有効化（保持される）
+                rollDice();
               } else {
-                rollDice(false); // 普通に振る
+                isCheatEnabled = false; // ★普通に振るを押した場合は機能OFF（ノーマル復帰）
+                rollDice();
               }
             }
           });
@@ -405,7 +401,7 @@
       Notification.requestPermission().then((permission) => {
         if (permission === 'granted' && swRegistration) {
           swRegistration.showNotification('3D Dice Roller', {
-            body: 'どちらで振りますか？',
+            body: '振るモードを選択してください',
             actions: [
               { action: 'normal', title: '🎲 普通に振る' },
               { action: 'cheat', title: '⚡ 機能ON' }
@@ -424,14 +420,19 @@
     }
 
     function setupUI() {
-      // 🎲タップで狙う出目を順繰り切り替え
+      // 🎲 タップで狙う出目を切り替え
       document.getElementById('btn-dice-toggle').addEventListener('click', (e) => {
         e.stopPropagation();
         targetFace = (targetFace % 6) + 1;
         showToast(`狙い出目: ${targetFace}`);
       });
 
-      document.getElementById('btn-roll').addEventListener('click', () => rollDice(false));
+      // 画面上の「🎲 画面で振る」ボタンを押した時
+      document.getElementById('btn-roll').addEventListener('click', () => {
+        // 現在の isCheatEnabled（機能ON/OFF）の状態のままサイコロを振る
+        rollDice();
+      });
+
       document.getElementById('btn-notify-trigger').addEventListener('click', sendRollNotification);
     }
 
@@ -439,7 +440,6 @@
       requestAnimationFrame(animate);
       world.step(1 / 60);
 
-      // 物理計算の位置・角度を同期
       diceMesh.position.copy(diceBody.position);
       diceMesh.quaternion.copy(diceBody.quaternion);
 
