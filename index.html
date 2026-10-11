@@ -70,7 +70,6 @@
       gap: 8px;
     }
 
-    /* 隠しスイッチ用ダイスアイコン */
     .dice-icon-btn {
       cursor: pointer;
       font-size: 1.5rem;
@@ -216,7 +215,7 @@
     let world, diceBodies = [], diceMeshes = [];
     let isRolling = false;
     let cheatActive = false;
-    let targetFace = 6; // デフォルト狙い出目
+    let targetFace = 6;
     let swRegistration = null;
 
     const diceFaceVectors = [
@@ -405,37 +404,23 @@
       }
     }
 
-    // --- Service Worker / 通知処理 ---
+    // --- 正しい外部ファイル 'sw.js' を登録 ---
     async function setupNotification() {
       if ('serviceWorker' in navigator && 'Notification' in window) {
-        const swCode = `
-          self.addEventListener('notificationclick', (event) => {
-            event.notification.close();
-            const action = event.action || 'normal';
-            
-            event.waitUntil(
-              clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-                for (const client of clientList) {
-                  client.postMessage({ action: action });
-                  client.focus();
-                  break;
-                }
-              })
-            );
-          });
-        `;
-        const blob = new Blob([swCode], { type: 'application/javascript' });
-        swRegistration = await navigator.serviceWorker.register(URL.createObjectURL(blob));
-
-        navigator.serviceWorker.addEventListener('message', (e) => {
-          if (e.data) {
-            if (e.data.action === 'cheat') {
-              rollDice(true);  // 機能ON（確定モード）で振る
-            } else {
-              rollDice(false); // 通常で振る
+        try {
+          swRegistration = await navigator.serviceWorker.register('./sw.js');
+          navigator.serviceWorker.addEventListener('message', (e) => {
+            if (e.data) {
+              if (e.data.action === 'cheat') {
+                rollDice(true);
+              } else {
+                rollDice(false);
+              }
             }
-          }
-        });
+          });
+        } catch (err) {
+          console.error('Service Worker Registration Failed:', err);
+        }
       }
     }
 
@@ -455,6 +440,8 @@
             ],
             tag: 'dice-control'
           });
+        } else if (permission === 'denied') {
+          alert('Androidの「設定 ＞ アプリ ＞ Chrome ＞ 通知」が許可されているか確認してください。');
         }
       });
     }
@@ -467,7 +454,6 @@
     }
 
     function setupUI() {
-      // 絵文字タップで狙い出目を1~6まで順繰り切り替え
       document.getElementById('btn-dice-toggle').addEventListener('click', (e) => {
         e.stopPropagation();
         targetFace = (targetFace % 6) + 1;
