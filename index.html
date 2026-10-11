@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>3D Dice Roller</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #0f172a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #f8fafc;
+    }
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .ui-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 16px;
+    }
+
+    .interactive {
+      pointer-events: auto;
+    }
+
+    .panel {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 14px 20px;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #fbbf24, #f59e0b);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* 隠しスイッチ用ダイスアイコン */
+    .dice-icon-btn {
+      cursor: pointer;
+      font-size: 1.5rem;
+      transition: transform 0.1s ease;
+      display: inline-block;
+    }
+    .dice-icon-btn:active {
+      transform: scale(1.3);
+    }
+
+    .toast-indicator {
+      position: absolute;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(245, 158, 11, 0.9);
+      color: #1e293b;
+      font-weight: bold;
+      font-size: 0.85rem;
+      padding: 6px 16px;
+      border-radius: 20px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+      z-index: 100;
+    }
+    .toast-indicator.show {
+      opacity: 1;
+    }
+
+    .controls {
+      position: absolute;
+      top: 75px;
+      right: 16px;
+      width: 240px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    label {
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+
+    select, button {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-roll {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #ffffff;
+      border: none;
+      font-size: 1rem;
+      padding: 12px;
+    }
+
+    .btn-notify {
+      background: #0284c7;
+      border-color: #38bdf8;
+    }
+
+    .result-panel {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      min-width: 220px;
+    }
+
+    .result-title {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+    }
+
+    .result-value {
+      font-size: 2.6rem;
+      font-weight: 800;
+      color: #fbbf24;
+      line-height: 1.1;
+    }
+
+    .result-details {
+      font-size: 0.85rem;
+      color: #cbd5e1;
+    }
+  </style>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+</head>
+<body>
+
+  <div id="canvas-container"></div>
+  <div id="toast" class="toast-indicator">狙い出目: 6</div>
+
+  <div class="ui-layer">
+    <header class="panel interactive">
+      <h1>
+        <span id="btn-dice-toggle" class="dice-icon-btn">🎲</span>
+        3D Dice Roller
+      </h1>
+    </header>
+
+    <div class="controls panel interactive">
+      <button id="btn-roll" class="btn-roll">🎲 サイコロを振る</button>
+      <button id="btn-notify-trigger" class="btn-notify">🔔 通知を出す</button>
+
+      <div class="control-group">
+        <label>サイコロの個数</label>
+        <select id="select-count">
+          <option value="1">1 個</option>
+          <option value="2" selected>2 個</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="result-panel panel interactive">
+      <div class="result-title">Total Result</div>
+      <div id="result-value" class="result-value">-</div>
+      <div id="result-details" class="result-details">タップで振る</div>
+    </div>
+  </div>
+
+  <script>
+    let scene, camera, renderer, controls;
+    let world, diceBodies = [], diceMeshes = [];
+    let isRolling = false;
+    let cheatActive = false;
+    let targetFace = 6; // デフォルト狙い出目
+    let swRegistration = null;
+
+    const diceFaceVectors = [
+      { face: 1, vec: new THREE.Vector3(0, 0, 1) },
+      { face: 2, vec: new THREE.Vector3(0, 0, -1) },
+      { face: 3, vec: new THREE.Vector3(0, 1, 0) },
+      { face: 4, vec: new THREE.Vector3(0, -1, 0) },
+      { face: 5, vec: new THREE.Vector3(1, 0, 0) },
+      { face: 6, vec: new THREE.Vector3(-1, 0, 0) }
+    ];
+
+    function createDiceTexture(number) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 256);
+      ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 12; ctx.strokeRect(0, 0, 256, 256);
+
+      const drawDot = (x, y, isOne = false) => {
+        ctx.beginPath();
+        ctx.arc(x, y, isOne ? 32 : 20, 0, Math.PI * 2);
+        ctx.fillStyle = isOne ? '#ef4444' : '#1e293b';
+        ctx.fill(); ctx.closePath();
+      };
+
+      const c = 128, l = 64, r = 192, t = 64, b = 192;
+      if (number === 1) drawDot(c, c, true);
+      else if (number === 2) { drawDot(l, t); drawDot(r, b); }
+      else if (number === 3) { drawDot(l, t); drawDot(c, c); drawDot(r, b); }
+      else if (number === 4) { drawDot(l, t); drawDot(r, t); drawDot(l, b); drawDot(r, b); }
+      else if (number === 5) { drawDot(l, t); drawDot(r, t); drawDot(c, c); drawDot(l, b); drawDot(r, b); }
+      else if (number === 6) { drawDot(l, t); drawDot(r, t); drawDot(l, c); drawDot(r, c); drawDot(l, b); drawDot(r, b); }
+
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    function createDiceMaterials() {
+      return [5, 6, 3, 4, 1, 2].map(num => new THREE.MeshStandardMaterial({
+        map: createDiceTexture(num), roughness: 0.2
+      }));
+    }
+
+    function init() {
+      const container = document.getElementById('canvas-container');
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0f172a);
+
+      camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 12, 14);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      container.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.mouseButtons = { RIGHT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, LEFT: THREE.MOUSE.NONE };
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(10, 20, 10);
+      dirLight.castShadow = true;
+      scene.add(dirLight);
+
+      world = new CANNON.World();
+      world.gravity.set(0, -25, 0);
+
+      const mat = new CANNON.Material();
+      world.addContactMaterial(new CANNON.ContactMaterial(mat, mat, { friction: 0.3, restitution: 0.5 }));
+
+      const floorBody = new CANNON.Body({ mass: 0, material: mat });
+      floorBody.addShape(new CANNON.Plane());
+      floorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+      world.addBody(floorBody);
+
+      const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: 0x1e293b }));
+      floorMesh.rotation.x = -Math.PI / 2;
+      floorMesh.receiveShadow = true;
+      scene.add(floorMesh);
+
+      updateDiceCount(2);
+      setupUI();
+      setupNotification();
+
+      animate();
+    }
+
+    function updateDiceCount(count) {
+      diceBodies.forEach(b => world.remove(b));
+      diceMeshes.forEach(m => scene.remove(m));
+      diceBodies = []; diceMeshes = [];
+
+      const mats = createDiceMaterials();
+      const geo = new THREE.BoxGeometry(1.8, 1.8, 1.8);
+
+      for (let i = 0; i < count; i++) {
+        const mesh = new THREE.Mesh(geo, mats);
+        mesh.castShadow = true;
+        scene.add(mesh);
+        diceMeshes.push(mesh);
+
+        const body = new CANNON.Body({ mass: 2 });
+        body.addShape(new CANNON.Box(new CANNON.Vec3(0.9, 0.9, 0.9)));
+        world.addBody(body);
+        diceBodies.push(body);
+      }
+    }
+
+    function rollDice(enableCheat = false) {
+      if (isRolling) return;
+      isRolling = true;
+      cheatActive = enableCheat;
+
+      document.getElementById('result-value').innerText = '...';
+      document.getElementById('result-details').innerText = '回転中...';
+
+      const count = diceBodies.length;
+      diceBodies.forEach((body, i) => {
+        const offsetX = (i - (count - 1) / 2) * 2.5;
+        body.position.set(offsetX, 6 + Math.random() * 2, (Math.random() - 0.5) * 2);
+        body.velocity.set((Math.random() - 0.5) * 8, -5, (Math.random() - 0.5) * 8);
+
+        if (cheatActive) {
+          applyCheatInitialRotation(body, targetFace);
+        } else {
+          body.quaternion.setFromEuler(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+          body.angularVelocity.set((Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25, (Math.random() - 0.5) * 25);
+        }
+      });
+
+      checkDiceStopped();
+    }
+
+    function applyCheatInitialRotation(body, target) {
+      const targetVecInfo = diceFaceVectors.find(v => v.face === target);
+      if (!targetVecInfo) return;
+
+      const targetQuat = new THREE.Quaternion();
+      targetQuat.setFromUnitVectors(targetVecInfo.vec, new THREE.Vector3(0, 1, 0));
+
+      const randomYQuat = new THREE.Quaternion();
+      randomYQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI * (Math.floor(Math.random() * 4) / 2));
+      targetQuat.multiply(randomYQuat);
+
+      body.quaternion.copy(targetQuat);
+      body.angularVelocity.set(0, (Math.random() - 0.5) * 4, 0);
+    }
+
+    function checkDiceStopped() {
+      const timer = setInterval(() => {
+        let allStopped = true;
+        diceBodies.forEach(body => {
+          if (body.velocity.length() + body.angularVelocity.length() > 0.1) allStopped = false;
+        });
+
+        if (allStopped) {
+          clearInterval(timer);
+          isRolling = false;
+          calculateResults();
+        }
+      }, 200);
+    }
+
+    function calculateResults() {
+      const results = [];
+      diceMeshes.forEach((mesh) => {
+        let maxDot = -1, topFace = 1;
+        diceFaceVectors.forEach(fv => {
+          const dot = fv.vec.clone().applyQuaternion(mesh.quaternion).dot(new THREE.Vector3(0, 1, 0));
+          if (dot > maxDot) { maxDot = dot; topFace = fv.face; }
+        });
+        results.push(topFace);
+      });
+
+      const total = results.reduce((a, b) => a + b, 0);
+      document.getElementById('result-value').innerText = total;
+      document.getElementById('result-details').innerText = `出目: [ ${results.join(' , ')} ]`;
+
+      if (swRegistration && Notification.permission === 'granted') {
+        swRegistration.showNotification('🎲 出目結果', {
+          body: `合計: ${total} (出目: ${results.join(', ')})`,
+          tag: 'dice-result'
+        });
+      }
+    }
+
+    // --- Service Worker / 通知処理 ---
+    async function setupNotification() {
+      if ('serviceWorker' in navigator && 'Notification' in window) {
+        const swCode = `
+          self.addEventListener('notificationclick', (event) => {
+            event.notification.close();
+            const action = event.action || 'normal';
+            
+            event.waitUntil(
+              clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+                for (const client of clientList) {
+                  client.postMessage({ action: action });
+                  client.focus();
+                  break;
+                }
+              })
+            );
+          });
+        `;
+        const blob = new Blob([swCode], { type: 'application/javascript' });
+        swRegistration = await navigator.serviceWorker.register(URL.createObjectURL(blob));
+
+        navigator.serviceWorker.addEventListener('message', (e) => {
+          if (e.data) {
+            if (e.data.action === 'cheat') {
+              rollDice(true);  // 機能ON（確定モード）で振る
+            } else {
+              rollDice(false); // 通常で振る
+            }
+          }
+        });
+      }
+    }
+
+    function sendRollNotification() {
+      if (!('Notification' in window)) {
+        alert('Web通知機能に対応していません。');
+        return;
+      }
+
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted' && swRegistration) {
+          swRegistration.showNotification('3D Dice Roller', {
+            body: '振るモードを選択してください',
+            actions: [
+              { action: 'normal', title: '🎲 普通に振る' },
+              { action: 'cheat', title: '⚡ 機能ON' }
+            ],
+            tag: 'dice-control'
+          });
+        }
+      });
+    }
+
+    function showToast(text) {
+      const toast = document.getElementById('toast');
+      toast.innerText = text;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1200);
+    }
+
+    function setupUI() {
+      // 絵文字タップで狙い出目を1~6まで順繰り切り替え
+      document.getElementById('btn-dice-toggle').addEventListener('click', (e) => {
+        e.stopPropagation();
+        targetFace = (targetFace % 6) + 1;
+        showToast(`狙い出目: ${targetFace}`);
+      });
+
+      document.getElementById('btn-roll').addEventListener('click', () => rollDice(false));
+      document.getElementById('btn-notify-trigger').addEventListener('click', sendRollNotification);
+      document.getElementById('select-count').addEventListener('change', (e) => {
+        updateDiceCount(parseInt(e.target.value));
+      });
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      world.step(1 / 60);
+      for (let i = 0; i < diceBodies.length; i++) {
+        diceMeshes[i].position.copy(diceBodies[i].position);
+        diceMeshes[i].quaternion.copy(diceBodies[i].quaternion);
+      }
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>
